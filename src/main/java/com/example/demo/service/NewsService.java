@@ -6,15 +6,11 @@ import org.springframework.stereotype.Service;
 import org.springframework.web.client.RestTemplate;
 import org.springframework.web.util.UriComponentsBuilder;
 
-import java.util.ArrayList;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
+import java.util.*;
 
 @Service
 public class NewsService {
 
-    // Replace with your actual API key
     private final String API_KEY = "OeJ4xsu8N5eiMBLVNNQB4WdPLKgaVY565moNfJ0h";
     private final String BASE_URL = "https://api.marketaux.com/v1/news/all";
 
@@ -23,8 +19,8 @@ public class NewsService {
         RestTemplate restTemplate = new RestTemplate();
 
         String url = UriComponentsBuilder.fromUriString(BASE_URL)
-                .queryParam("countries", "IN") // Indian news
-                .queryParam("categories", "business")// business news
+                .queryParam("countries", "IN")
+                .queryParam("categories", "business")
                 .queryParam("filter_entities", "true")
                 .queryParam("limit", "10")
                 .queryParam("api_token", API_KEY)
@@ -33,29 +29,74 @@ public class NewsService {
         return restTemplate.getForObject(url, String.class);
     }
 
-    // Filter news that have stock entities and convert to Map
+    // Filter + Transform news for UI
     public List<Map<String, Object>> filterStockNews(String rawJson) {
+
         List<Map<String, Object>> stockNews = new ArrayList<>();
 
         JSONObject obj = new JSONObject(rawJson);
         JSONArray data = obj.getJSONArray("data");
 
         for (int i = 0; i < data.length(); i++) {
-            JSONObject newsItem = data.getJSONObject(i);
-            JSONArray entities = newsItem.getJSONArray("entities");
 
-            if (entities.length() > 0) {
-                // Convert JSONObject to Map for Thymeleaf
+            JSONObject newsItem = data.getJSONObject(i);
+            JSONArray entities = newsItem.optJSONArray("entities");
+
+            if (entities != null && entities.length() > 0) {
+
                 Map<String, Object> map = new HashMap<>();
+
+                // Basic fields
                 map.put("title", newsItem.optString("title"));
-                map.put("description", newsItem.optString("description"));
+                map.put("highlight", newsItem.optString("description"));
                 map.put("url", newsItem.optString("url"));
-                map.put("image_url", newsItem.optString("image_url"));
-                map.put("published_at", newsItem.optString("published_at"));
+                map.put("image", newsItem.optString("image_url"));
+                map.put("date", newsItem.optString("published_at"));
+
+                // 🔥 Stock impact lists
+                List<String> upStocks = new ArrayList<>();
+                List<String> downStocks = new ArrayList<>();
+
+                for (int j = 0; j < entities.length(); j++) {
+
+                    JSONObject entity = entities.getJSONObject(j);
+
+                    String symbol = entity.optString("symbol");
+                    double sentiment = entity.optDouble("sentiment_score", 0);
+
+                    if (symbol != null && !symbol.isEmpty()) {
+
+                        if (sentiment > 0) {
+                            upStocks.add(symbol);
+                        } else if (sentiment < 0) {
+                            downStocks.add(symbol);
+                        }
+                    }
+                }
+
+                map.put("upStocks", upStocks);
+                map.put("downStocks", downStocks);
+
                 stockNews.add(map);
             }
         }
 
         return stockNews;
+    }
+
+    public List<Map<String, Object>> searchNews(String query) {
+
+        RestTemplate restTemplate = new RestTemplate();
+
+        String url = UriComponentsBuilder.fromUriString(BASE_URL)
+                .queryParam("search", query) // 🔥 dynamic search
+                .queryParam("language", "en")
+                .queryParam("limit", "10")
+                .queryParam("api_token", API_KEY)
+                .toUriString();
+
+        String rawJson = restTemplate.getForObject(url, String.class);
+
+        return filterStockNews(rawJson); // reuse your existing logic
     }
 }
